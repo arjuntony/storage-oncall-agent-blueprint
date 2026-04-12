@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Storage Oncall Agent — Architecture</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --orange: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --cyan: #79c0ff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
+
+  h1 {
+    font-size: 2.5em;
+    text-align: center;
+    margin-bottom: 10px;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .subtitle {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 1.1em;
+    margin-bottom: 60px;
+  }
+
+  h2 {
+    font-size: 1.8em;
+    margin: 60px 0 30px;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+  }
+
+  /* ── Section Nav ───────────────────────────────── */
+  .section-nav {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 50px;
+  }
+  .section-nav a {
+    padding: 8px 20px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.9em;
+    transition: all 0.3s;
+  }
+  .section-nav a:hover {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
+  /* ── Flow Diagram ──────────────────────────────── */
+  .flow-diagram {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    margin: 40px 0;
+  }
+
+  .flow-box {
+    background: var(--card);
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 32px;
+    width: 100%;
+    max-width: 700px;
+    position: relative;
+    opacity: 0;
+    transform: translateY(30px);
+    animation: slideIn 0.6s ease forwards;
+  }
+
+  .flow-box:nth-child(1) { animation-delay: 0.1s; }
+  .flow-box:nth-child(3) { animation-delay: 0.3s; }
+  .flow-box:nth-child(5) { animation-delay: 0.5s; }
+  .flow-box:nth-child(7) { animation-delay: 0.7s; }
+  .flow-box:nth-child(9) { animation-delay: 0.9s; }
+
+  @keyframes slideIn {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .flow-box h3 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1.2em;
+    margin-bottom: 8px;
+  }
+
+  .flow-box p { color: var(--text-dim); font-size: 0.95em; }
+  .flow-box .tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 0.75em;
+    font-weight: 600;
+  }
+  .tag-tech { background: #1f3a5f; color: var(--accent); }
+  .tag-action { background: #1a3d1f; color: var(--green); }
+
+  .flow-arrow {
+    width: 3px;
+    height: 40px;
+    background: linear-gradient(180deg, var(--accent), var(--purple));
+    position: relative;
+    opacity: 0;
+    animation: fadeIn 0.5s ease forwards;
+  }
+  .flow-arrow::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 8px solid var(--purple);
+  }
+  .flow-arrow:nth-child(2) { animation-delay: 0.2s; }
+  .flow-arrow:nth-child(4) { animation-delay: 0.4s; }
+  .flow-arrow:nth-child(6) { animation-delay: 0.6s; }
+  .flow-arrow:nth-child(8) { animation-delay: 0.8s; }
+
+  @keyframes fadeIn { to { opacity: 1; } }
+
+  /* ── ReAct Loop Animation ──────────────────────── */
+  .react-loop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    margin: 40px auto;
+    max-width: 800px;
+    position: relative;
+  }
+
+  .react-step {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    padding: 16px 24px;
+    background: var(--card);
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    opacity: 0;
+    animation: stepAppear 0.5s ease forwards;
+    position: relative;
+  }
+
+  .react-step.active {
+    border-color: var(--green);
+    box-shadow: 0 0 20px rgba(63, 185, 80, 0.15);
+  }
+
+  .react-step .step-num {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.9em;
+    flex-shrink: 0;
+  }
+  .step-claude { background: #3d1f5f; color: var(--purple); }
+  .step-tool { background: #1a3d1f; color: var(--green); }
+  .step-answer { background: #1f3a5f; color: var(--accent); }
+
+  .react-step .step-body h4 { font-size: 1em; margin-bottom: 4px; }
+  .react-step .step-body p { color: var(--text-dim); font-size: 0.85em; margin: 0; }
+  .react-step .step-body code {
+    background: #1f2937;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    color: var(--cyan);
+  }
+
+  @keyframes stepAppear { to { opacity: 1; } }
+  .react-step:nth-child(1) { animation-delay: 0.2s; }
+  .react-step:nth-child(2) { animation-delay: 0.6s; }
+  .react-step:nth-child(3) { animation-delay: 1.0s; }
+  .react-step:nth-child(4) { animation-delay: 1.4s; }
+  .react-step:nth-child(5) { animation-delay: 1.8s; }
+  .react-step:nth-child(6) { animation-delay: 2.2s; }
+  .react-step:nth-child(7) { animation-delay: 2.6s; }
+  .react-step:nth-child(8) { animation-delay: 3.0s; }
+  .react-step:nth-child(9) { animation-delay: 3.4s; }
+
+  /* Loop arrow */
+  .loop-indicator {
+    position: absolute;
+    right: -60px;
+    top: 60px;
+    bottom: 60px;
+    width: 40px;
+    border: 3px solid var(--orange);
+    border-left: none;
+    border-radius: 0 20px 20px 0;
+    opacity: 0;
+    animation: fadeIn 1s ease 2s forwards;
+  }
+  .loop-indicator::after {
+    content: '🔄 LOOP';
+    position: absolute;
+    right: -8px;
+    top: 50%;
+    transform: translateY(-50%) rotate(90deg);
+    font-size: 0.7em;
+    color: var(--orange);
+    white-space: nowrap;
+    font-weight: 700;
+  }
+
+  /* ── API Call Detail ───────────────────────────── */
+  .api-call {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.85em;
+    overflow-x: auto;
+    position: relative;
+  }
+  .api-call .method { color: var(--green); font-weight: 700; }
+  .api-call .url { color: var(--cyan); }
+  .api-call .key { color: var(--purple); }
+  .api-call .string { color: var(--green); }
+  .api-call .comment { color: var(--text-dim); font-style: italic; }
+  .api-call .highlight {
+    background: rgba(88, 166, 255, 0.1);
+    display: block;
+    margin: 0 -20px;
+    padding: 0 20px;
+  }
+
+  /* ── Comparison Table ──────────────────────────── */
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin: 30px 0;
+  }
+  .compare-card {
+    background: var(--card);
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .compare-card h3 {
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .compare-card .flow-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    color: var(--text-dim);
+    font-size: 0.9em;
+  }
+  .flow-line .arrow { color: var(--accent); }
+  .compare-card.highlight-card { border-color: var(--green); }
+
+  /* ── File Tree ─────────────────────────────────── */
+  .file-tree {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 0.85em;
+    line-height: 1.8;
+  }
+  .file-tree .folder { color: var(--accent); }
+  .file-tree .file { color: var(--text-dim); }
+  .file-tree .desc { color: var(--orange); font-style: italic; font-family: -apple-system, sans-serif; }
+
+  /* ── Tool Cards ────────────────────────────────── */
+  .tool-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    margin: 30px 0;
+  }
+  .tool-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    transition: all 0.3s;
+  }
+  .tool-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(88, 166, 255, 0.1);
+  }
+  .tool-card h4 {
+    font-size: 0.95em;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tool-card p { color: var(--text-dim); font-size: 0.8em; margin: 0; }
+
+  /* ── Graduation Timeline ───────────────────────── */
+  .timeline {
+    position: relative;
+    margin: 40px 0;
+    padding-left: 40px;
+  }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 15px;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: linear-gradient(180deg, var(--green), var(--accent), var(--purple));
+  }
+  .timeline-item {
+    position: relative;
+    margin-bottom: 30px;
+    padding: 16px 20px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -33px;
+    top: 22px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 3px solid var(--green);
+    background: var(--bg);
+  }
+  .timeline-item h4 { color: var(--accent); margin-bottom: 6px; }
+  .timeline-item p { color: var(--text-dim); font-size: 0.9em; }
+  .timeline-item .effort {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 0.75em;
+    background: #1a3d1f;
+    color: var(--green);
+  }
+
+  /* ── Pulse animation for live elements ─────────── */
+  .pulse {
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  /* ── Data flow animation ───────────────────────── */
+  .data-packet {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: packetMove 2s linear infinite;
+  }
+  @keyframes packetMove {
+    0% { transform: translateY(0); opacity: 0; }
+    20% { opacity: 1; }
+    80% { opacity: 1; }
+    100% { transform: translateY(40px); opacity: 0; }
+  }
+
+  /* ── Responsive ────────────────────────────────── */
+  @media (max-width: 768px) {
+    .compare { grid-template-columns: 1fr; }
+    .loop-indicator { display: none; }
+    h1 { font-size: 1.8em; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <h1>Storage Oncall Agent</h1>
+  <p class="subtitle">AI-powered triage for MDS switches, storage arrays, ESXi VMs, and FC fabrics</p>
+
+  <nav class="section-nav">
+    <a href="#concept">Core Concept</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#react-loop">ReAct Loop</a>
+    <a href="#api-detail">API Call Detail</a>
+    <a href="#tools">Tools</a>
+    <a href="#files">File Structure</a>
+    <a href="#graduation">Graduation Path</a>
+  </nav>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <h2 id="concept">How It Works — Claude Code vs. This Agent</h2>
+
+  <div class="compare">
+    <div class="compare-card">
+      <h3>Claude Code (what you know)</h3>
+      <div class="flow-line">You type <span class="arrow">&rarr;</span></div>
+      <div class="flow-line">Claude CLI <span class="arrow">&rarr;</span></div>
+      <div class="flow-line"><strong>1 API call</strong> to Claude <span class="arrow">&rarr;</span></div>
+      <div class="flow-line">Response</div>
+      <br>
+      <p style="color: var(--text-dim); font-size: 0.85em;">
+        Single request, single response.<br>
+        Claude sees your code directly.
+      </p>
+    </div>
+
+    <div class="compare-card highlight-card">
+      <h3>Storage Agent (what we're building)</h3>
+      <div class="flow-line">You type <span class="arrow">&rarr;</span></div>
+      <div class="flow-line">Streamlit UI <span class="arrow">&rarr;</span></div>
+      <div class="flow-line">LangGraph <span class="arrow">&rarr;</span> <strong style="color: var(--orange);">LOOP:</strong></div>
+      <div class="flow-line">&nbsp;&nbsp;API call #1 <span class="arrow">&rarr;</span> tool call <span class="arrow">&rarr;</span> run YOUR code</div>
+      <div class="flow-line">&nbsp;&nbsp;API call #2 <span class="arrow">&rarr;</span> tool call <span class="arrow">&rarr;</span> run YOUR code</div>
+      <div class="flow-line">&nbsp;&nbsp;API call #3 <span class="arrow">&rarr;</span> final answer</div>
+      <div class="flow-line">Response</div>
+      <br>
+      <p style="color: var(--text-dim); font-size: 0.85em;">
+        Multiple API calls in a loop.<br>
+        Claude sees tool RESULTS, not your infra directly.
+      </p>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <h2 id="architecture">Architecture — Request Flow</h2>
+
+  <div class="flow-diagram">
+    <div class="flow-box" style="border-color: var(--accent);">
+      <h3><span style="font-size:1.3em">👤</span> You (Browser / CLI)</h3>
+      <p>Type: "Triage MDS switch lva1-mds01 — ports flapping"</p>
+      <span class="tag tag-tech">Streamlit :8501</span>
+    </div>
+
+    <div class="flow-arrow"></div>
+
+    <div class="flow-box" style="border-color: var(--purple);">
+      <h3><span style="font-size:1.3em">🖥️</span> Frontend (Streamlit)</h3>
+      <p>Chat interface receives your message, passes to agent engine</p>
+      <span class="tag tag-tech">Python</span>
+      <span class="tag tag-action">Send to agent</span>
+    </div>
+
+    <div class="flow-arrow"></div>
+
+    <div class="flow-box" style="border-color: var(--orange);">
+      <h3><span style="font-size:1.3em">🧠</span> Agent Engine (LangGraph ReAct)</h3>
+      <p>
+        The brain. Takes system prompt + your message + tool definitions.<br>
+        Calls Claude API in a <strong>loop</strong> — Claude decides which tools to call,<br>
+        reads results, calls more tools, until it has a final answer.
+      </p>
+      <span class="tag tag-tech">LangGraph</span>
+      <span class="tag tag-tech">LangChain</span>
+      <span class="tag tag-action">Tool Loop</span>
+    </div>
+
+    <div class="flow-arrow"></div>
+
+    <div class="flow-box" style="border-color: var(--green);">
+      <h3><span style="font-size:1.3em">🔧</span> Your Tools (Python Functions)</h3>
+      <p>
+        <code>mds_port_status()</code>, <code>array_health()</code>, <code>esxi_vm_status()</code>, etc.<br>
+        POC: return synthetic data. Later: call real APIs (MDS NX-API, vCenter, etc.)
+      </p>
+      <span class="tag tag-tech">Python @tool</span>
+      <span class="tag tag-action">Execute locally</span>
+    </div>
+
+    <div class="flow-arrow"></div>
+
+    <div class="flow-box" style="border-color: var(--red);">
+      <h3><span style="font-size:1.3em">☁️</span> Claude API <span class="pulse" style="color: var(--green);">●</span></h3>
+      <p>
+        <code>POST https://api.anthropic.com/v1/messages</code><br>
+        The <strong>ONLY</strong> external dependency. Same API as Claude Code uses.<br>
+        Each loop iteration = 1 API call. Typically 3-6 calls per triage.
+      </p>
+      <span class="tag tag-tech">Anthropic SDK</span>
+      <span class="tag tag-action">HTTPS outbound</span>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <h2 id="react-loop">ReAct Loop — Live Triage Example</h2>
+  <p style="color: var(--text-dim); margin-bottom: 20px;">
+    User says: <strong>"Triage incident STOR-2001 — storage array degraded"</strong>
+  </p>
+
+  <div class="react-loop">
+    <div class="loop-indicator"></div>
+
+    <div class="react-step">
+      <div class="step-num step-claude">C1</div>
+      <div class="step-body">
+        <h4>Claude thinks: "I need to see the incident first"</h4>
+        <p>Calls: <code>get_storage_incidents(status="active")</code></p>
+      </div>
+    </div>
+
+    <div class="react-step">
+      <div class="step-num step-tool">T1</div>
+      <div class="step-body">
+        <h4>Tool returns: 3 active incidents</h4>
+        <p>STOR-2001: array degraded, 2 disk failures, 47 VMs affected</p>
+      </div>
+    </div>
+
+    <div class="react-step">
+      <div class="step-num step-claude">C2</div>
+      <div class="step-body">
+        <h4>Claude thinks: "Disk failures — check the array health"</h4>
+        <p>Calls: <code>array_health(array_name="stor-lva1-array05")</code></p>
+      </div>
+    </div>
+
+    <div class="react-step">
+      <div class="step-num step-tool">T2</div>
+      <div class="step-body">
+        <h4>Tool returns: Array degraded</h4>
+        <p>RG02 lost redundancy (disk-2-14 failed), RG03 rebuilding (43.2%), write latency 8.5ms</p>
+      </div>
+    </div>
+
+    <div class="react-step">
+      <div class="step-num step-claude">C3</div>
+      <div class="step-body">
+        <h4>Claude thinks: "Need the disk failure runbook + VM impact"</h4>
+        <p>Calls: <code>search_runbooks("disk failure")</code> + <code>esxi_vm_status("esxi-lva1-host10")</code></p>
+      </div>
+    </div>
+
+    <div class="react-step">
+      <div class="step-num step-tool">T3</div>
+      <div class="step-body">
+        <h4>Tools return: Runbook found + ESXi status</h4>
+        <p>disk-failure.md matched, 23 VMs on host, memory 92%, datastore latency 45ms</p>
+      </div>
+    </div>
+
+    <div class="react-step">
+      <div class="step-num step-claude">C4</div>
+      <div class="step-body">
+        <h4>Claude thinks: "Load the runbook for remediation steps"</h4>
+        <p>Calls: <code>load_runbook("disk-failure.md")</code></p>
+      </div>
+    </div>
+
+    <div class="react-step">
+      <div class="step-num step-tool">T4</div>
+      <div class="step-body">
+        <h4>Tool returns: Full runbook text</h4>
+        <p>Triage steps, remediation procedures, escalation paths</p>
+      </div>
+    </div>
+
+    <div class="react-step active">
+      <div class="step-num step-answer">F</div>
+      <div class="step-body">
+        <h4 style="color: var(--green);">Claude synthesizes final triage report</h4>
+        <p>Root cause + blast radius (47 VMs) + immediate actions + escalation. <strong>No more tool calls — done.</strong></p>
+      </div>
+    </div>
+  </div>
+
+  <p style="color: var(--text-dim); text-align: center; font-size: 0.9em;">
+    <strong>5 API calls to Claude</strong> (C1-C4 + final) &bull;
+    <strong>6 tool executions</strong> (all local Python) &bull;
+    <strong>~15 seconds</strong> total
+  </p>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <h2 id="api-detail">What the Claude API Call Actually Looks Like</h2>
+  <p style="color: var(--text-dim); margin-bottom: 16px;">
+    This is what LangGraph sends on iteration 2 (after the first tool result comes back):
+  </p>
+
+  <div class="api-call">
+    <span class="method">POST</span> <span class="url">https://api.anthropic.com/v1/messages</span><br><br>
+    {<br>
+    &nbsp;&nbsp;<span class="key">"model"</span>: <span class="string">"claude-sonnet-4-5-20250929"</span>,<br>
+    &nbsp;&nbsp;<span class="key">"system"</span>: <span class="string">"You are a Storage Oncall Assistant..."</span>,<br>
+    &nbsp;&nbsp;<span class="key">"messages"</span>: [<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;{<span class="key">"role"</span>: <span class="string">"user"</span>, <span class="key">"content"</span>: <span class="string">"Triage STOR-2001"</span>},<br>
+    <span class="highlight">&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">// Claude's previous response — it chose to call a tool</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;{<span class="key">"role"</span>: <span class="string">"assistant"</span>, <span class="key">"content"</span>: [{<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"type"</span>: <span class="string">"tool_use"</span>,<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"name"</span>: <span class="string">"get_storage_incidents"</span>,<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"input"</span>: {<span class="key">"status"</span>: <span class="string">"active"</span>}<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;}]},</span><br>
+    <span class="highlight">&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">// Your tool's output — injected by LangGraph</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;{<span class="key">"role"</span>: <span class="string">"user"</span>, <span class="key">"content"</span>: [{<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"type"</span>: <span class="string">"tool_result"</span>,<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"content"</span>: <span class="string">"{\"incidents\": [{\"id\": \"STOR-2001\", ...}]}"</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;}]},</span><br>
+    &nbsp;&nbsp;],<br>
+    &nbsp;&nbsp;<span class="key">"tools"</span>: [<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;{<span class="key">"name"</span>: <span class="string">"mds_port_status"</span>, <span class="key">"description"</span>: <span class="string">"Get MDS switch..."</span>, <span class="key">"input_schema"</span>: {...}},<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;{<span class="key">"name"</span>: <span class="string">"array_health"</span>, <span class="key">"description"</span>: <span class="string">"Get storage array..."</span>, <span class="key">"input_schema"</span>: {...}},<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">// ... all 11 tools listed here</span><br>
+    &nbsp;&nbsp;]<br>
+    }
+  </div>
+
+  <p style="color: var(--text-dim); font-size: 0.9em; margin-top: 16px;">
+    <strong>Key insight:</strong> Claude sees tool <em>definitions</em> (name + description + schema) and tool <em>results</em>.<br>
+    It never sees your infrastructure directly. Your Python functions run locally and return data to Claude.
+  </p>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <h2 id="tools">Available Tools</h2>
+
+  <div class="tool-grid">
+    <div class="tool-card">
+      <h4>🚨 get_storage_incidents</h4>
+      <p>Active incidents with severity, alerts, affected hosts/VMs. Always call FIRST.</p>
+    </div>
+    <div class="tool-card">
+      <h4>🔌 mds_port_status</h4>
+      <p>MDS switch port state — flap count, CRC errors, speed, connected devices.</p>
+    </div>
+    <div class="tool-card">
+      <h4>🏷️ mds_zoneset</h4>
+      <p>Active FC zoneset — zone names, WWPN members, login status.</p>
+    </div>
+    <div class="tool-card">
+      <h4>🖥️ esxi_vm_status</h4>
+      <p>ESXi host — CPU, memory, VMs, datastore latency, HBA status.</p>
+    </div>
+    <div class="tool-card">
+      <h4>💿 datastore_health</h4>
+      <p>Datastore detail — capacity, latency, SCSI errors, snapshots, connected hosts.</p>
+    </div>
+    <div class="tool-card">
+      <h4>🗄️ array_health</h4>
+      <p>Storage array — disk state, RAID groups, rebuild progress, I/O performance.</p>
+    </div>
+    <div class="tool-card">
+      <h4>💥 disk_failures</h4>
+      <p>Failed disks — SMART data, replacement tickets, failure rate trend.</p>
+    </div>
+    <div class="tool-card">
+      <h4>🔧 rv_tool_check</h4>
+      <p>RV tool checks — connectivity, firmware, zoning validation.</p>
+    </div>
+    <div class="tool-card">
+      <h4>🌐 fabric_topology</h4>
+      <p>FC fabric — switches, ISL links, path redundancy, connected devices.</p>
+    </div>
+    <div class="tool-card">
+      <h4>🔍 search_runbooks</h4>
+      <p>Search oncall runbooks by keyword — returns matching titles and snippets.</p>
+    </div>
+    <div class="tool-card">
+      <h4>📖 load_runbook</h4>
+      <p>Load full runbook content — triage steps, remediation, escalation.</p>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <h2 id="files">Project File Structure</h2>
+
+  <div class="file-tree">
+    <span class="folder">storage-oncall-agent/</span><br>
+    ├── <span class="file">.env</span> <span class="desc"># ANTHROPIC_API_KEY=sk-ant-...</span><br>
+    ├── <span class="file">pyproject.toml</span> <span class="desc"># dependencies</span><br>
+    │<br>
+    ├── <span class="folder">app/</span><br>
+    │&nbsp;&nbsp; ├── <span class="file">config.py</span> <span class="desc"># loads .env, model selection</span><br>
+    │&nbsp;&nbsp; ├── <span class="file">agent.py</span> <span class="desc"># LangGraph ReAct agent + system prompt</span><br>
+    │&nbsp;&nbsp; └── <span class="file">main.py</span> <span class="desc"># Streamlit chat UI</span><br>
+    │<br>
+    ├── <span class="folder">tools/</span><br>
+    │&nbsp;&nbsp; ├── <span class="file">__init__.py</span> <span class="desc"># exports ALL_TOOLS list</span><br>
+    │&nbsp;&nbsp; ├── <span class="file">incidents.py</span> <span class="desc"># get_storage_incidents</span><br>
+    │&nbsp;&nbsp; ├── <span class="file">mds.py</span> <span class="desc"># mds_port_status, mds_zoneset</span><br>
+    │&nbsp;&nbsp; ├── <span class="file">esxi.py</span> <span class="desc"># esxi_vm_status, datastore_health</span><br>
+    │&nbsp;&nbsp; ├── <span class="file">storage_array.py</span> <span class="desc"># array_health, disk_failures</span><br>
+    │&nbsp;&nbsp; ├── <span class="file">rv_tool.py</span> <span class="desc"># rv_tool_check</span><br>
+    │&nbsp;&nbsp; ├── <span class="file">fabric.py</span> <span class="desc"># fabric_topology</span><br>
+    │&nbsp;&nbsp; └── <span class="file">runbooks.py</span> <span class="desc"># search_runbooks, load_runbook</span><br>
+    │<br>
+    ├── <span class="folder">runbooks/</span><br>
+    │&nbsp;&nbsp; ├── <span class="file">mds-port-flap.md</span><br>
+    │&nbsp;&nbsp; ├── <span class="file">disk-failure.md</span><br>
+    │&nbsp;&nbsp; ├── <span class="file">esxi-vm-hang.md</span><br>
+    │&nbsp;&nbsp; ├── <span class="file">datastore-full.md</span><br>
+    │&nbsp;&nbsp; └── <span class="file">rv-tool-errors.md</span><br>
+    │<br>
+    └── <span class="folder">tests/</span><br>
+    &nbsp;&nbsp;&nbsp; ├── <span class="file">test_tools.py</span><br>
+    &nbsp;&nbsp;&nbsp; └── <span class="file">test_agent.py</span>
+  </div>
+
+  <p style="color: var(--text-dim); margin-top: 16px; text-align: center;">
+    <strong>~12 files total.</strong> Every tool is a single Python function. Every runbook is a markdown file.
+  </p>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <h2 id="graduation">Graduation Path — POC to Production</h2>
+
+  <div class="timeline">
+    <div class="timeline-item">
+      <h4>Phase 1: POC (Now)</h4>
+      <p>Synthetic data, 11 tools, 5 runbooks. No real APIs needed. Just an Anthropic API key.</p>
+      <span class="effort">1-2 days</span>
+    </div>
+
+    <div class="timeline-item">
+      <h4>Phase 2: Real Incident Data</h4>
+      <p>Connect to your alerting system (PagerDuty, OpsGenie, custom). Replace <code>get_storage_incidents</code> synthetic data with real API calls.</p>
+      <span class="effort">2-3 days</span>
+    </div>
+
+    <div class="timeline-item">
+      <h4>Phase 3: Real MDS + vCenter APIs</h4>
+      <p>Replace synthetic MDS data with Cisco NX-API (JSON-RPC over HTTP). Replace ESXi data with vSphere REST API.</p>
+      <span class="effort">1-2 weeks</span>
+    </div>
+
+    <div class="timeline-item">
+      <h4>Phase 4: Storage Array + RV Tool APIs</h4>
+      <p>Connect to vendor-specific array APIs (Dell PowerStore, NetApp ONTAP, Pure Storage). Integrate RV tool.</p>
+      <span class="effort">1-2 weeks</span>
+    </div>
+
+    <div class="timeline-item">
+      <h4>Phase 5: Smart Routing + Context Management</h4>
+      <p>Add middleware to classify queries (triage vs analytics), filter tools, switch models. Add scratchpad for large outputs.</p>
+      <span class="effort">3-5 days</span>
+    </div>
+
+    <div class="timeline-item">
+      <h4>Phase 6: Slack Bot + CLI</h4>
+      <p>Add Slack integration for oncall notifications. Build CLI for terminal-based triage.</p>
+      <span class="effort">1 week</span>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════ -->
+  <div style="text-align: center; margin: 80px 0 40px; padding: 40px; background: var(--card); border-radius: 16px; border: 1px solid var(--border);">
+    <h2 style="border: none; margin: 0 0 16px;">Ready to Build?</h2>
+    <p style="color: var(--text-dim); font-size: 1.1em; max-width: 600px; margin: 0 auto 20px;">
+      Open Claude Code, hand it the <strong>BLUEPRINT.md</strong> file, and say:<br>
+      <code style="background: #1f2937; padding: 4px 12px; border-radius: 6px; color: var(--green); font-size: 1.1em;">"Build this."</code>
+    </p>
+    <p style="color: var(--text-dim); font-size: 0.9em;">
+      Total external dependencies: <strong>1</strong> (Anthropic API key)<br>
+      Total files to create: <strong>~12</strong><br>
+      Time to working demo: <strong>Under 1 hour</strong>
+    </p>
+  </div>
+
+</div>
+
+</body>
+</html>
