@@ -338,8 +338,244 @@ flowchart LR
 
 ---
 
+## Chapter 10: Real World — All Data Sources Working Together
+
+> Your friend has live data (RV tool, syslog) AND offline data (show-tech files). Both are tools. Skills tell Claude when to use which.
+
+### The Rule
+
+```mermaid
+flowchart LR
+    subgraph DATA["ANY data = TOOL"]
+        direction TB
+        D1[Live API - RV tool]
+        D2[Live logs - syslog]
+        D3[Live metrics - Prometheus]
+        D4[Offline file - show-tech]
+        D5[Offline file - config backup]
+        D6[Database - JIRA tickets]
+    end
+
+    subgraph PROCEDURE["HOW to investigate = SKILL"]
+        direction TB
+        P1[interface-flapping.md]
+        P2[disk-failure.md]
+        P3[backup-failure.md]
+    end
+
+    DATA -->|provides data to| CLAUDE[Claude reads data\ndecides next step]
+    PROCEDURE -->|tells Claude\nwhat steps to follow| CLAUDE
+
+    style DATA fill:#0d2b0d,stroke:#3fb950,stroke-width:2px,color:#e6edf3
+    style PROCEDURE fill:#2d1f00,stroke:#d29922,stroke-width:2px,color:#e6edf3
+    style CLAUDE fill:#1a3d5f,stroke:#58a6ff,stroke-width:3px,color:#e6edf3
+```
+
+Doesn't matter if data comes from a live API or a file on disk. Tool = data. Skill = steps.
+
+---
+
+### The Tools — All Data Sources
+
+```mermaid
+flowchart TD
+    subgraph LIVE["LIVE DATA — real-time from infrastructure"]
+        RV[get_rv_tool_data\nhostname\nSSH or API to RV tool\nreturns connectivity\nfirmware zoning status]
+
+        SYSLOG[get_syslog_entries\nhostname keyword hours\nreads from syslog server\nreturns timestamped log entries]
+
+        METRICS[get_metrics\nhostname metric_name\nqueries Prometheus\nreturns counters and gauges]
+    end
+
+    subgraph OFFLINE["OFFLINE DATA — files on disk"]
+        SHOWTECH[load_show_tech\nhostname section\nreads show-tech file from disk\nreturns parsed section data\nHUGE files - load by section]
+
+        CONFIG[load_device_config\nhostname\nreads config backup file\nreturns running config text]
+    end
+
+    subgraph EXTERNAL["EXTERNAL SYSTEMS"]
+        JIRA[get_open_tickets\nhostname\nqueries JIRA API\nreturns open tickets for device]
+    end
+
+    LIVE --> CLAUDE{Claude\ndecides which\ntools to call}
+    OFFLINE --> CLAUDE
+    EXTERNAL --> CLAUDE
+
+    style LIVE fill:#0d2b0d,stroke:#3fb950,stroke-width:2px,color:#e6edf3
+    style OFFLINE fill:#1a2d1a,stroke:#3fb950,stroke-width:2px,color:#e6edf3
+    style EXTERNAL fill:#0d1f3c,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    style CLAUDE fill:#2d1f00,stroke:#d29922,stroke-width:3px,color:#e6edf3
+```
+
+---
+
+### Show-Tech — Why Two-Step Loading
+
+> Show-tech files are 10,000+ lines. If you dump everything into Claude, it chokes. So load in two steps.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Claude as Claude API
+    participant Tool as load_show_tech
+
+    User->>Claude: interface fc1/3 on lva1-mds01 is flapping
+
+    Note over Claude: I need show-tech data for this switch
+
+    Claude->>Tool: load_show_tech hostname=lva1-mds01
+    Note over Tool: Returns section LIST only, not content
+    Tool->>Claude: Available sections: interfaces, vsan, zoneset, flogi, fcns, hardware, logging
+
+    Note over Claude: For flapping I need interfaces and flogi
+
+    Claude->>Tool: load_show_tech hostname=lva1-mds01 section=interfaces
+    Tool->>Claude: Interface table - fc1/3 DOWN, 47 flaps, 892 CRC errors
+
+    Claude->>Tool: load_show_tech hostname=lva1-mds01 section=flogi
+    Tool->>Claude: FLOGI table - device 21:00:00:24:ff:4a:12:03 NOT logged in
+
+    Note over Claude: Got targeted data without loading 10K lines
+    Claude->>User: fc1/3 is down with CRC errors. FLOGI shows device logged out. Likely bad SFP.
+```
+
+---
+
+### Full Investigation — Live + Offline + Skill Together
+
+> User says: "interface fc1/3 on lva1-mds01 is flapping, investigate"
+
+> Claude loads the skill, then calls live tools AND offline tools as the skill directs.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Claude as Claude API
+    participant Live as Live Tools
+    participant Offline as Offline Tools
+    participant Skill as interface-flapping.md
+
+    User->>Claude: interface fc1/3 on lva1-mds01 is flapping, investigate
+
+    Note over Claude: Need failure data + investigation skill
+
+    rect rgb(40, 20, 40)
+    Note over Claude,Skill: Load the investigation skill
+    Claude->>Live: search_runbooks interface flapping
+    Live->>Claude: Found interface-flapping.md
+    Claude->>Live: load_runbook interface-flapping.md
+    Live->>Claude: Full skill with steps
+    end
+
+    Note over Claude: Skill Step 1 says check syslog
+
+    rect rgb(20, 40, 20)
+    Note over Claude,Live: Step 1 - Live syslog data
+    Claude->>Live: get_syslog_entries lva1-mds01 flap 24
+    Live->>Claude: 47 flap events, last one 10 min ago
+    Claude->>Live: get_syslog_entries lva1-mds01 CRC 24
+    Live->>Claude: 892 CRC errors on fc1/3
+    end
+
+    Note over Claude: Skill Step 2 says check RV tool
+
+    rect rgb(20, 40, 20)
+    Note over Claude,Live: Step 2 - Live RV tool data
+    Claude->>Live: get_rv_tool_data lva1-mds01
+    Live->>Claude: connectivity 1 path down, firmware current
+    end
+
+    Note over Claude: Skill Step 3 says check show-tech
+
+    rect rgb(20, 30, 40)
+    Note over Claude,Offline: Step 3 - Offline show-tech data
+    Claude->>Offline: load_show_tech lva1-mds01
+    Offline->>Claude: Available sections: interfaces, flogi, hardware...
+    Claude->>Offline: load_show_tech lva1-mds01 section=interfaces
+    Offline->>Claude: fc1/3 error counters confirm CRC trend
+    Claude->>Offline: load_show_tech lva1-mds01 section=flogi
+    Offline->>Claude: Device 21:00:00:24:ff:4a:12:03 NOT logged in
+    end
+
+    Note over Claude: Skill Step 4 says correlate
+
+    rect rgb(40, 30, 10)
+    Note over Claude: Step 4 - Correlate and compile report
+    Claude->>Claude: CRC errors in syslog + show-tech confirm bad SFP
+    Claude->>Claude: FLOGI shows device logged out
+    Claude->>Claude: RV tool shows 1 path down
+    Claude->>User: ESCALATION REPORT\nRoot cause: bad SFP on fc1/3\nEvidence: 892 CRC errors in syslog, confirmed in show-tech,\nFLOGI shows device logged out, RV tool shows path down\nBlast radius: stor-lva1-array05 lost 1 path\nAction: replace SFP on fc1/3\nEscalate to: storage-infra for SFP swap
+    end
+
+    Note over User,Offline: 6 API calls. 7 tools used. Live + offline data correlated.
+```
+
+---
+
+### The Skill That Drove This Investigation
+
+This is what `interface-flapping.md` looks like — it names exact tools and exact parameters:
+
+```
+# Skill: Interface Flapping Investigation
+
+Step 1: Check syslog (LIVE)
+  - get_syslog_entries(hostname, "flap", 24) → count flap events
+  - get_syslog_entries(hostname, "CRC", 24) → CRC errors present?
+
+Step 2: Check RV tool (LIVE)
+  - get_rv_tool_data(hostname) → connectivity and firmware
+
+Step 3: Check show-tech (OFFLINE)
+  - load_show_tech(hostname) → list available sections
+  - load_show_tech(hostname, "interfaces") → error counters
+  - load_show_tech(hostname, "flogi") → device login status
+
+Step 4: Correlate and report
+  - CRC in syslog + CRC in show-tech → physical layer issue (bad SFP/cable)
+  - No CRC anywhere → host HBA issue or firmware bug
+  - FLOGI device not logged in → confirms link is fully down
+  - Compile escalation report. DO NOT remediate.
+```
+
+Claude follows this like a checklist. The more specific the tool names and parameters, the better Claude follows them.
+
+---
+
+### Summary — All Data Sources
+
+```mermaid
+flowchart TD
+    USER[User asks about\ninterface flapping] --> CLAUDE[Claude loads skill\nfollows steps]
+
+    CLAUDE --> STEP1[Step 1: LIVE syslog\nget_syslog_entries]
+    CLAUDE --> STEP2[Step 2: LIVE RV tool\nget_rv_tool_data]
+    CLAUDE --> STEP3[Step 3: OFFLINE show-tech\nload_show_tech]
+    CLAUDE --> STEP4[Step 4: Correlate all data\nwrite escalation report]
+
+    STEP1 -->|47 flaps, 892 CRC| EVIDENCE[All evidence\ncollected]
+    STEP2 -->|1 path down, firmware OK| EVIDENCE
+    STEP3 -->|counters confirm CRC\ndevice not logged in| EVIDENCE
+
+    EVIDENCE --> STEP4
+    STEP4 --> REPORT[Escalation report\nfor human to act on]
+
+    style USER fill:#1a1a2e,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    style CLAUDE fill:#1a3d5f,stroke:#58a6ff,stroke-width:3px,color:#e6edf3
+    style STEP1 fill:#0d2b0d,stroke:#3fb950,stroke-width:2px,color:#e6edf3
+    style STEP2 fill:#0d2b0d,stroke:#3fb950,stroke-width:2px,color:#e6edf3
+    style STEP3 fill:#1a2d1a,stroke:#3fb950,stroke-width:2px,color:#e6edf3
+    style STEP4 fill:#2d1f00,stroke:#d29922,stroke-width:2px,color:#e6edf3
+    style EVIDENCE fill:#161b22,stroke:#30363d,color:#e6edf3
+    style REPORT fill:#2d0d0d,stroke:#f85149,stroke-width:2px,color:#e6edf3
+```
+
+**Live data + offline data + skills = full investigation. Claude correlates everything. Human gets the report.**
+
+---
+
 ## The One-Sentence Summary
 
-> **You define the tools (data) and skills (procedures). Claude decides when to call them and synthesizes everything into a human-readable answer.**
+> **You define the tools (data from anywhere — APIs, syslog, files on disk) and skills (step-by-step procedures). Claude decides when to call them and synthesizes everything into a human-readable answer.**
 
 That's it. That's the whole thing.
