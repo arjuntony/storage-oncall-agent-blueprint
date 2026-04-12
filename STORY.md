@@ -574,6 +574,265 @@ flowchart TD
 
 ---
 
+---
+
+## Chapter 11: MDS 9710 Interface Triage — The Full Skill in Action
+
+> This is the real use case. An MDS switch interface goes down. The skill drives a 10-step investigation. Claude follows it step by step, calling tools, collecting evidence, and handing off to a human.
+
+### The Scenario
+
+```
+ALERT: InterfaceFlapping — lva1-mds01 fc1/3 — 47 flaps in 24h, 892 CRC errors
+```
+
+### How the Skill Drives the Agent
+
+```mermaid
+sequenceDiagram
+    actor Oncall as Storage Oncall
+    participant Agent as Claude Agent
+    participant Skill as mds-interface-issues.md
+    participant Tools as Python Tools
+    participant ShowTech as Show-Tech Files
+
+    Oncall->>Agent: triage lva1-mds01 fc1/3 flapping
+
+    Note over Agent: Load the skill first
+    Agent->>Skill: load_skill(mds-interface-issues.md)
+    Skill-->>Agent: 10-step investigation procedure
+
+    rect rgb(13, 43, 13)
+        Note over Agent,Tools: PHASE 1 - BLAST RADIUS
+        Agent->>Tools: get_interface_status(lva1-mds01)
+        Tools-->>Agent: fc1/3 is F-port, connected to storage array, VSAN 100
+        Note over Agent: F-port to storage = single path affected
+
+        Agent->>Tools: get_flogi_database(lva1-mds01)
+        Tools-->>Agent: WWPN 21:00:00:24:ff:4a:12:03 - NOT logged in
+        Note over Agent: Device lost from fabric
+    end
+
+    rect rgb(26, 26, 46)
+        Note over Agent,ShowTech: PHASE 2 - TRIAGE
+        Agent->>Tools: get_interface_status(lva1-mds01, fc1/3)
+        Tools-->>Agent: Status: down, reason: link_failure
+
+        Agent->>Tools: get_interface_counters(lva1-mds01, fc1/3)
+        Tools-->>Agent: 47 link failures, 892 CRC, 3 signal losses
+
+        Agent->>Tools: get_syslog_entries(lva1-mds01, fc1/3, 1)
+        Tools-->>Agent: 47 flap events in last hour
+
+        Note over Agent: CRC + signal loss = physical layer issue
+
+        Agent->>Tools: get_flogi_database(lva1-mds01)
+        Tools-->>Agent: fc1/3 FLOGI missing
+
+        Agent->>Tools: get_vsan_status(lva1-mds01)
+        Tools-->>Agent: VSAN 100 active, zone member missing
+
+        Agent->>Tools: get_device_health(lva1-mds01)
+        Tools-->>Agent: CPU 35%, memory 62%, modules OK
+    end
+
+    rect rgb(45, 31, 0)
+        Note over Agent,ShowTech: PHASE 3 - FILL GAPS WITH OFFLINE DATA
+        Agent->>ShowTech: load_show_tech(lva1-mds01)
+        ShowTech-->>Agent: Sections: interfaces, flogi, vsan, hardware, logging
+
+        Agent->>ShowTech: load_show_tech(lva1-mds01, interfaces)
+        ShowTech-->>Agent: fc1/3 counter detail confirms CRC trend
+    end
+
+    rect rgb(45, 13, 13)
+        Note over Agent: PHASE 4 - ESCALATE
+        Note over Agent: Evidence compiled from 10 steps
+        Agent-->>Oncall: HANDOFF REPORT
+    end
+```
+
+### The Escalation Report Claude Produces
+
+```
+HANDOFF:
+  device:         lva1-mds01
+  platform:       Cisco MDS 9710
+  alert:          InterfaceFlapping + CRCErrors
+  port:           fc1/3
+  port_type:      F-port (storage array)
+  connected_to:   WWPN 21:00:00:24:ff:4a:12:03 (stor-lva1-array05-hba3)
+  vsan:           100
+  root_cause:     PHYSICAL — bad SFP or fiber cable
+  blast_radius:   Single storage path — check multipath on connected hosts
+
+  evidence:
+    interface_state:    down (link_failure)
+    link_failures_1hr:  47
+    crc_errors:         892
+    signal_losses:      3
+    flogi_status:       missing (device not in fabric)
+    vsan_state:         active
+    zone_intact:        no — member missing from z_array05_host12
+    device_health:      OK (CPU 35%, mem 62%, modules OK)
+    show_tech_used:     yes — confirmed CRC trend in counter history
+
+  recommended:    Replace SFP and fiber on fc1/3. Clean connectors.
+                  After replacement, verify FLOGI re-registers.
+  notify:         DC Technicians
+```
+
+### The Investigation Flow — All 10 Steps
+
+```mermaid
+flowchart TD
+    ALERT[ALERT: fc1/3 flapping\n47 flaps, 892 CRC] --> S1
+
+    subgraph P1["PHASE 1: BLAST RADIUS"]
+        S1[Step 1: Port type + topology\nget_interface_status\nget_flogi_database\nget_fspf_neighbors]
+        S2[Step 2: Port-channel check\nget_port_channel_summary\nISL ports only]
+    end
+
+    subgraph P2["PHASE 2: TRIAGE"]
+        S3[Step 3: Still down?\nget_interface_status interface]
+        S4[Step 4: Flap count\nget_interface_counters\nget_syslog_entries]
+        S5[Step 5: Physical errors\nCRC signal credit\nget_interface_counters]
+        S6[Step 6: FLOGI + FCNS\nDevice in fabric?\nget_flogi_database]
+        S7[Step 7: VSAN + zone\nget_vsan_status\nget_zone_status]
+        S8[Step 8: Device health\nget_device_health\nCPU mem modules PSU]
+    end
+
+    subgraph P3["PHASE 3: FILL GAPS"]
+        S9[Step 9: Show-tech\nload_show_tech\nFill any no-data gaps]
+    end
+
+    subgraph P4["PHASE 4: ESCALATE"]
+        S10[Step 10: HANDOFF\nCompile all evidence\nRoot cause + action + notify]
+    end
+
+    S1 --> S2
+    S2 --> S3
+    S3 --> S4
+    S4 --> S5
+    S5 --> S6
+    S6 --> S7
+    S7 --> S8
+    S8 --> S9
+    S9 --> S10
+
+    S5 -.->|credit_loss detected| SLOW[load_skill\nmds-slow-drain.md]
+    S8 -.->|CRITICAL health| HEALTH[load_skill\nmds-health-check.md]
+
+    style ALERT fill:#2d0d0d,stroke:#f85149,stroke-width:2px,color:#e6edf3
+    style P1 fill:#0d2b0d,stroke:#3fb950,stroke-width:2px,color:#e6edf3
+    style P2 fill:#1a1a2e,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    style P3 fill:#2d1f00,stroke:#d29922,stroke-width:2px,color:#e6edf3
+    style P4 fill:#2d0d0d,stroke:#f85149,stroke-width:2px,color:#e6edf3
+    style SLOW fill:#2d1f00,stroke:#d29922,stroke-width:1px,color:#e6edf3
+    style HEALTH fill:#2d1f00,stroke:#d29922,stroke-width:1px,color:#e6edf3
+```
+
+### Decision Logic at Each Step
+
+```mermaid
+flowchart TD
+    S5{Step 5: What errors?}
+
+    S5 -->|CRC > 0\nsignal_losses > 0| PHY[Physical layer\nBad SFP or fiber]
+    S5 -->|credit_loss > 0\ntimeout_discards > 0| SLOW[Slow-drain\nHBA queue depth issue]
+    S5 -->|All counters = 0| CLEAN[Not physical\nCheck config or remote]
+
+    PHY --> S6A{Step 6: FLOGI?}
+    SLOW --> DRAIN[load_skill\nmds-slow-drain.md]
+    CLEAN --> S6B{Step 6: FLOGI?}
+
+    S6A -->|Gone| DEAD[SFP/cable dead\nDevice lost from fabric]
+    S6A -->|Present| DYING[SFP degrading\nStill works intermittently]
+
+    S6B -->|Gone| CONFIG[Check remote device\nMay be powered off]
+    S6B -->|Present| ZONE[Check zone config\nMay be misconfigured]
+
+    DEAD --> ESC1[DC Tech: replace SFP + fiber]
+    DYING --> ESC2[DC Tech: proactive replacement]
+    CONFIG --> ESC3[Storage Admin: check device]
+    ZONE --> ESC4[Net Eng: check zone config]
+    DRAIN --> ESC5[Storage Admin: check HBA queue depth]
+
+    style S5 fill:#1a3d5f,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    style PHY fill:#2d0d0d,stroke:#f85149,color:#e6edf3
+    style SLOW fill:#2d1f00,stroke:#d29922,color:#e6edf3
+    style CLEAN fill:#0d2b0d,stroke:#3fb950,color:#e6edf3
+    style DRAIN fill:#2d1f00,stroke:#d29922,color:#e6edf3
+    style DEAD fill:#2d0d0d,stroke:#f85149,color:#e6edf3
+    style DYING fill:#2d1f00,stroke:#d29922,color:#e6edf3
+    style CONFIG fill:#1a1a2e,stroke:#58a6ff,color:#e6edf3
+    style ZONE fill:#1a1a2e,stroke:#58a6ff,color:#e6edf3
+    style ESC1 fill:#161b22,stroke:#f85149,color:#e6edf3
+    style ESC2 fill:#161b22,stroke:#d29922,color:#e6edf3
+    style ESC3 fill:#161b22,stroke:#58a6ff,color:#e6edf3
+    style ESC4 fill:#161b22,stroke:#58a6ff,color:#e6edf3
+    style ESC5 fill:#161b22,stroke:#d29922,color:#e6edf3
+```
+
+### What the Agent DOES vs DOES NOT Do
+
+```mermaid
+flowchart LR
+    subgraph DOES["AGENT DOES"]
+        D1[Collect evidence\nfrom all data sources]
+        D2[Follow the skill\nstep by step]
+        D3[Correlate findings\nacross tools]
+        D4[Determine root cause\nfrom evidence]
+        D5[Compile structured\nhandoff report]
+    end
+
+    subgraph DOESNT["AGENT DOES NOT"]
+        N1[Replace SFP\nor fiber cable]
+        N2[Push config\nto switch]
+        N3[Shut or no-shut\nports]
+        N4[Modify zones\nor VSANs]
+        N5[File change\nmanagement tickets]
+    end
+
+    DOES --> HANDOFF[Human gets report\nHuman takes action]
+    DOESNT -.->|These require\nhuman judgment| HANDOFF
+
+    style DOES fill:#0d2b0d,stroke:#3fb950,stroke-width:2px,color:#e6edf3
+    style DOESNT fill:#2d0d0d,stroke:#f85149,stroke-width:2px,color:#e6edf3
+    style HANDOFF fill:#1a3d5f,stroke:#58a6ff,stroke-width:3px,color:#e6edf3
+```
+
+### File Structure — Skills + Tools
+
+```
+storage-oncall-agent/
+├── skills/                              # Investigation procedures
+│   ├── mds-interface-issues.md          # THIS skill — 10-step interface triage
+│   ├── mds-health-check.md              # Device health assessment
+│   ├── mds-slow-drain.md                # Credit loss investigation
+│   ├── mds-zone-issues.md               # Zone database troubleshooting
+│   ├── storage-array-connectivity.md    # Array port + multipath check
+│   └── esxi-hba-issues.md              # Host HBA troubleshooting
+│
+├── tools/                               # Data sources (Python functions)
+│   ├── mds.py                           # get_interface_status, get_interface_counters
+│   │                                    # get_flogi_database, get_fspf_neighbors
+│   │                                    # get_port_channel_summary, get_vsan_status
+│   │                                    # get_zone_status, get_device_health
+│   ├── syslog.py                        # get_syslog_entries
+│   ├── show_tech.py                     # load_show_tech (two-step: list then load)
+│   ├── esxi.py                          # esxi_vm_status, datastore_health
+│   ├── storage_array.py                 # array_health, disk_failures
+│   ├── rv_tool.py                       # rv_tool_check
+│   └── skills.py                        # search_skills, load_skill
+│
+└── app/
+    ├── agent.py                         # LangGraph ReAct loop
+    └── main.py                          # Streamlit UI
+```
+
+---
+
 ## The One-Sentence Summary
 
 > **You define the tools (data from anywhere — APIs, syslog, files on disk) and skills (step-by-step procedures). Claude decides when to call them and synthesizes everything into a human-readable answer.**
