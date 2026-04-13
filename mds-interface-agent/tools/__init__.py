@@ -16,6 +16,7 @@ from tools.mds_live import (
 from tools.syslog import get_syslog_entries
 from tools.show_tech import load_show_tech
 from tools.skills import search_skills, load_skill
+from tools.influxdb_tools import INFLUXDB_TOOLS
 
 ALL_TOOLS = [
     # LIVE: MDS NX-API tools
@@ -37,4 +38,6 @@ ALL_TOOLS = [
     # SKILLS: Investigation procedures
     search_skills,
     load_skill,
+    # TIME-SERIES: InfluxDB
+    *INFLUXDB_TOOLS,
 ]

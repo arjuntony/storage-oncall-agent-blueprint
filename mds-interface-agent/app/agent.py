@@ -39,8 +39,13 @@ port flapping, CRC errors, link failures, signal loss, credit starvation, ISL di
 
 ## Data Sources
 
-You have three tiers of data:
+You have four tiers of data:
 - **LIVE** (NX-API): `get_interface_status`, `get_interface_counters`, `get_flogi_database`, etc.
+- **TIME-SERIES** (InfluxDB): `influx_get_interface_counters`, `influx_get_port_status`,
+  `influx_get_san_analytics`, `influx_get_sfp_diagnostics`, `influx_get_syslog_messages`, etc.
+  These query historical time-series data — use them for trending, correlation, and root-cause
+  analysis. Call `influx_get_switch_inventory` first to discover available switches.
+  If InfluxDB is not configured, these tools return an error — fall back to LIVE tools.
 - **STREAMING** (syslog): `get_syslog_entries` — timestamped event history
 - **OFFLINE** (show-tech files): `load_show_tech` — pre-collected, load by section
 

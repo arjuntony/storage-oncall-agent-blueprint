@@ -22,3 +22,12 @@ if not MODEL_NAME:
 
 MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "25"))
 DEMO_MODE = not ANTHROPIC_API_KEY and not OPENAI_API_KEY
+
+# InfluxDB — set these to enable time-series queries
+INFLUXDB_VERSION = os.getenv("INFLUXDB_VERSION", "1")  # "1" or "2"
+INFLUXDB_URL = os.getenv("INFLUXDB_URL", "")  # e.g. http://localhost:8086
+INFLUXDB_TOKEN = os.getenv("INFLUXDB_TOKEN", "")  # v2 only
+INFLUXDB_ORG = os.getenv("INFLUXDB_ORG", "")  # v2 only
+INFLUXDB_BUCKET = os.getenv("INFLUXDB_BUCKET", "mds_san")  # v2 bucket or v1 database
+INFLUXDB_USERNAME = os.getenv("INFLUXDB_USERNAME", "")  # v1 only
+INFLUXDB_PASSWORD = os.getenv("INFLUXDB_PASSWORD", "")  # v1 only
